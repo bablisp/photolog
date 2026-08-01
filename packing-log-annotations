@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Accession Log</title>
+<script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/idb-keyval@6/dist/umd.js"></script>
+<style>
+  :root{
+    --ink:#eae3d3;
+    --charcoal:#1b1a18;
+    --tag:#c98a3e;
+    --paper:#efe8d8;
+    --paper-line:#c9bfa4;
+    --teal:#4c6b64;
+    --danger:#a8503f;
+    --mono: 'Courier New', ui-monospace, monospace;
+    --serif: Georgia, 'Times New Roman', serif;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--charcoal); color:var(--ink);
+    font-family:var(--serif);
+    display:flex; flex-direction:column; min-height:100vh;
+    overflow-x:hidden;
+  }
+  header{
+    padding:14px 18px 10px; display:flex; align-items:baseline; justify-content:space-between;
+    border-bottom:1px solid #35322d;
+  }
+  header .title{font-family:var(--mono); letter-spacing:2px; font-size:12px; color:var(--tag); text-transform:uppercase;}
+  header .count{font-family:var(--mono); font-size:12px; color:#8a8577;}
+  nav{display:flex; gap:0;}
+  nav button{
+    flex:1; background:none; border:none; color:#8a8577; font-family:var(--mono);
+    font-size:11px; letter-spacing:1px; text-transform:uppercase; padding:10px 0; border-bottom:2px solid transparent;
+  }
+  nav button.active{color:var(--tag); border-bottom-color:var(--tag);}
+  #storageNotice{
+    background:#3a2f1c; color:#e8c98a; font-family:var(--mono); font-size:11px;
+    line-height:1.5; padding:10px 18px; border-bottom:1px solid #5a4a2a;
+  }
+
+  main{flex:1; display:flex; flex-direction:column; padding:18px;}
+
+  /* --- CAPTURE VIEW --- */
+  .card{
+    background:var(--paper); color:#2a2620; border-radius:2px;
+    padding:16px; flex:1; display:flex; flex-direction:column;
+    box-shadow:0 8px 24px rgba(0,0,0,.35);
+    position:relative;
+  }
+  .card::before{
+    content:attr(data-tag); position:absolute; top:-11px; left:16px;
+    background:var(--tag); color:#1b1a18; font-family:var(--mono); font-size:11px;
+    letter-spacing:1px; padding:3px 10px; border-radius:2px; font-weight:bold;
+  }
+  .room-row{margin-top:0;}
+  .room-row label{font-family:var(--mono); font-size:11px; letter-spacing:1px; text-transform:uppercase; color:#6b6858;}
+  #roomInput{
+    width:100%; margin-top:4px; padding:12px; font-family:var(--serif); font-size:16px;
+    border:1px solid var(--paper-line); border-radius:2px; background:#fff; color:#2a2620;
+  }
+
+  .photo-slot{
+    flex:1; min-height:220px; border:1.5px dashed var(--paper-line); border-radius:2px;
+    display:flex; align-items:center; justify-content:center; overflow:hidden; margin-top:10px;
+    background:#e4dcc7; position:relative;
+  }
+  .photo-slot img{width:100%; height:100%; object-fit:cover; display:block;}
+  .photo-slot .hint{font-family:var(--mono); font-size:12px; color:#9a9075; text-align:center; padding:20px;}
+  input[type=file]{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  }
+  .shutter{
+    margin-top:14px; padding:18px; border:none; border-radius:2px; background:var(--charcoal);
+    color:var(--ink); font-family:var(--mono); font-size:14px; letter-spacing:1px; text-transform:uppercase;
+    display:block; text-align:center; cursor:pointer; user-select:none; -webkit-user-select:none;
+  }
+  .shutter:active{background:#000;}
+
+  #noteBox{
+    margin-top:14px; width:100%; font-family:var(--serif); font-size:16px; padding:10px;
+    border:1px solid var(--paper-line); border-radius:2px; background:#fff; color:#2a2620;
+    resize:vertical; min-height:70px;
+  }
+  .note-hint{font-family:var(--mono); font-size:11px; color:#9a9075; margin-top:6px;}
+
+  .btn-save{
+    margin-top:14px; padding:20px; border:none; border-radius:2px; font-family:var(--mono);
+    font-size:14px; letter-spacing:1px; text-transform:uppercase; background:var(--tag); color:#1b1a18; font-weight:bold;
+  }
+  .btn-save:disabled{opacity:.35;}
+
+  /* --- LOG VIEW --- */
+  .entry{
+    display:flex; gap:12px; padding:12px 0; border-bottom:1px solid #35322d;
+  }
+  .room-group{margin-top:18px;}
+  .room-group:first-child{margin-top:0;}
+  .room-header{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:8px 0; border-bottom:1px solid var(--tag);
+  }
+  .room-header .name{font-family:var(--mono); font-size:13px; letter-spacing:1px; text-transform:uppercase; color:var(--tag);}
+  .room-header .count{font-family:var(--mono); font-size:11px; color:#8a8577;}
+  .room-export{
+    background:none; border:1px solid #4a463c; color:var(--ink); font-family:var(--mono);
+    font-size:10px; letter-spacing:1px; text-transform:uppercase; padding:6px 10px; border-radius:2px;
+  }
+  .entry img{width:64px; height:64px; object-fit:cover; border-radius:2px; flex-shrink:0; background:#333;}
+  .entry .meta{font-family:var(--mono); font-size:10px; color:var(--tag); letter-spacing:1px;}
+  .entry .note{font-size:15px; line-height:1.35; margin-top:2px;}
+  .entry .del{background:none; border:none; color:#6b6858; font-family:var(--mono); font-size:11px; margin-top:6px;}
+  .empty{font-family:var(--mono); color:#6b6858; font-size:13px; text-align:center; margin-top:60px;}
+  .export-btn{
+    margin-top:14px; padding:14px; border:1px solid #4a463c; border-radius:2px; background:none;
+    color:var(--ink); font-family:var(--mono); font-size:12px; letter-spacing:1px; text-transform:uppercase;
+    width:100%;
+  }
+  .export-btn.primary{background:var(--tag); color:#1b1a18; border-color:var(--tag); font-weight:bold;}
+  .toast{
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+    background:var(--tag); color:#1b1a18; padding:8px 16px; border-radius:2px;
+    font-family:var(--mono); font-size:12px; opacity:0; transition:opacity .25s; pointer-events:none;
+    max-width:85%; text-align:center;
+  }
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">Accession Log</div>
+  <div class="count" id="countLabel">No. 001</div>
+</header>
+<div id="storageNotice" style="display:none;"></div>
+<nav>
+  <button id="tabCapture" class="active">Capture</button>
+  <button id="tabLog">Log (<span id="logTabCount">0</span>)</button>
+</nav>
+
+<main>
+  <!-- CAPTURE VIEW -->
+  <div id="captureView" class="card" data-tag="specimen">
+    <div class="room-row">
+      <label for="roomInput">Room / area</label>
+      <input id="roomInput" list="roomList" placeholder="e.g. Kitchen" autocomplete="off">
+      <datalist id="roomList"></datalist>
+    </div>
+    <div class="photo-slot" id="photoSlot">
+      <div class="hint">Tap below to photograph the item</div>
+    </div>
+    <input type="file" id="fileInput" accept="image/*" capture="environment">
+    <label class="shutter" for="fileInput" id="shutterBtn">📷 Photograph item</label>
+
+    <textarea id="noteBox" placeholder="Type a note — or tap the mic icon on your keyboard to dictate"></textarea>
+    <div class="note-hint">Note gets saved directly into the photo's file (EXIF).</div>
+
+    <button class="btn-save" id="saveBtn" disabled>✔ Save & Next</button>
+  </div>
+
+  <!-- LOG VIEW -->
+  <div id="logView" style="display:none; flex:1; overflow-y:auto;">
+    <button class="export-btn primary" id="exportAllBtn">⬇ Export all rooms as .zip</button>
+    <button class="export-btn" id="exportTextBtn">Copy full log as text</button>
+    <div id="roomGroups" style="margin-top:6px;"></div>
+    <div class="empty" id="emptyMsg">No items logged yet.</div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const photoSlot = document.getElementById('photoSlot');
+const fileInput = document.getElementById('fileInput');
+const noteBox = document.getElementById('noteBox');
+const roomInput = document.getElementById('roomInput');
+const roomList = document.getElementById('roomList');
+const saveBtn = document.getElementById('saveBtn');
+const countLabel = document.getElementById('countLabel');
+const logTabCount = document.getElementById('logTabCount');
+const tabCapture = document.getElementById('tabCapture');
+const tabLog = document.getElementById('tabLog');
+const captureView = document.getElementById('captureView');
+const logView = document.getElementById('logView');
+const roomGroups = document.getElementById('roomGroups');
+const emptyMsg = document.getElementById('emptyMsg');
+const exportAllBtn = document.getElementById('exportAllBtn');
+const exportTextBtn = document.getElementById('exportTextBtn');
+const toast = document.getElementById('toast');
+
+const LAST_ROOM_KEY = 'packinglog:lastRoom';
+const DEFAULT_ROOM = 'Unsorted';
+
+// ============================================================
+// TUNABLE SETTINGS — safe to hand-edit these values directly.
+// ============================================================
+let PHOTO_MAX_W = 1600;   // max photo width in pixels before saving (bigger = sharper but larger files)
+let PHOTO_QUALITY = 0.82; // JPEG quality 0..1 (bigger = sharper but larger files)
+
+// FONT SIZE: multiplier applied to the caption text burned onto each photo.
+// 1.0 = the original default sizing (a ~2-sentence note fills roughly a
+// quarter of the frame). Lower this number to shrink the caption further,
+// raise it to make captions bigger. Currently set to a third of default size.
+const ANNOTATION_FONT_SCALE = 1/3;
+
+let currentPhoto = null; // upright, compressed JPEG data URL (no EXIF yet)
+let entries = [];
+let nextIndex = 1;
+
+function showToast(msg){
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(()=>toast.classList.remove('show'), 1600);
+}
+function pad3(n){ return String(n).padStart(3,'0'); }
+
+// ---------- storage (IndexedDB via idb-keyval; localStorage as a verified fallback) ----------
+// IMPORTANT: checking `typeof idbKeyval !== 'undefined'` only proves the LIBRARY loaded —
+// it does NOT prove IndexedDB actually works here. Many browsers block IndexedDB entirely
+// for pages opened as a local file:// (as opposed to a real https:// page), even though the
+// idb-keyval script itself loads fine. That mismatch was the actual cause of "Save failed":
+// every save silently tried to open a database that the browser refuses to create.
+// So we don't trust the mere presence of the library — we run a real write/delete and see
+// if it actually works, then commit to whichever backend actually functions.
+let storageBackend = null; // 'idb' | 'ls', set by detectStorageBackend() before first use
+const LS_PREFIX = 'packinglog:';
+
+async function detectStorageBackend(){
+  if(typeof idbKeyval !== 'undefined'){
+    try{
+      await idbKeyval.set('__cap_test__', 1);
+      await idbKeyval.del('__cap_test__');
+      return 'idb';
+    }catch(e){
+      console.warn('IndexedDB present but not usable here (likely a local file:// restriction) — falling back to localStorage.', e);
+    }
+  }
+  return 'ls';
+}
+
+// Thin wrapper so the rest of the app doesn't care which backend is active —
+// it always calls store.set/get/del/keys and this routes to whichever one
+// detectStorageBackend() decided actually works.
+const store = {
+  async set(key, value){
+    if(storageBackend === 'idb') return idbKeyval.set(key, value);
+    localStorage.setItem(LS_PREFIX+key, JSON.stringify(value));
+  },
+  async get(key){
+    if(storageBackend === 'idb') return idbKeyval.get(key);
+    const v = localStorage.getItem(LS_PREFIX+key);
+    return v===null ? undefined : JSON.parse(v);
+  },
+  async del(key){
+    if(storageBackend === 'idb') return idbKeyval.del(key);
+    localStorage.removeItem(LS_PREFIX+key);
+  },
+  async keys(){
+    if(storageBackend === 'idb') return idbKeyval.keys();
+    const out = [];
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(k && k.startsWith(LS_PREFIX)) out.push(k.slice(LS_PREFIX.length));
+    }
+    return out;
+  }
+};
+
+// ---------- rooms: every entry carries a free-text "room" tag ----------
+function roomOf(e){ return (e.room && e.room.trim()) || DEFAULT_ROOM; }
+
+// All room names currently in use, in first-seen order — powers both the
+// autocomplete suggestions and the Log tab's grouping.
+function distinctRooms(){
+  const seen = [];
+  entries.forEach(e=>{ const r = roomOf(e); if(seen.indexOf(r)===-1) seen.push(r); });
+  return seen;
+}
+
+// Keeps the <datalist> under the room input up to date so previously-used
+// room names show up as tap-to-fill suggestions.
+function refreshRoomList(){
+  roomList.innerHTML = '';
+  distinctRooms().forEach(r=>{
+    const opt = document.createElement('option');
+    opt.value = r;
+    roomList.appendChild(opt);
+  });
+}
+
+// Live "Kitchen — No. 004" style label, based on how many items already
+// exist in whatever room is currently typed into the room field.
+function updateCountLabel(){
+  const room = (roomInput.value.trim() || DEFAULT_ROOM);
+  const countInRoom = entries.filter(e=>roomOf(e)===room).length + 1;
+  countLabel.textContent = room + ' — No. ' + pad3(countInRoom);
+}
+
+// Pulls every saved entry back out of storage on startup and rebuilds
+// in-memory state (entries[], the next unique index, room list, etc).
+async function loadEntries(){
+  let keys = [];
+  try{ keys = await store.keys(); }catch(e){ keys = []; }
+  const entryKeys = keys.filter(k => typeof k === 'string' && k.indexOf('entry:') === 0);
+  const loaded = [];
+  for(const k of entryKeys){
+    try{
+      const e = await store.get(k);
+      if(e) loaded.push(e);
+    }catch(e){}
+  }
+  loaded.sort((a,b)=>a.index-b.index);
+  entries = loaded;
+  nextIndex = entries.length ? entries[entries.length-1].index+1 : 1;
+  logTabCount.textContent = entries.length;
+  refreshRoomList();
+  roomInput.value = localStorage.getItem(LAST_ROOM_KEY) || ''; // resume last-used room
+  updateCountLabel();
+  renderLog();
+}
+
+// Rebuilds the Log tab: one collapsible-looking group per room, each with
+// its own item count, its own "Export .zip" button, and a delete control
+// on every entry.
+function renderLog(){
+  roomGroups.innerHTML = '';
+  emptyMsg.style.display = entries.length ? 'none' : 'block';
+
+  const rooms = distinctRooms();
+  rooms.forEach(room=>{
+    const roomEntries = entries.filter(e=>roomOf(e)===room);
+    const group = document.createElement('div');
+    group.className = 'room-group';
+    const safeRoom = room.replace(/</g,'&lt;');
+    group.innerHTML = `
+      <div class="room-header">
+        <span class="name">${safeRoom}</span>
+        <span class="count">${roomEntries.length} item${roomEntries.length===1?'':'s'}</span>
+        <button class="room-export" data-room="${safeRoom}">Export .zip</button>
+      </div>
+      <div class="room-entries"></div>`;
+    const list = group.querySelector('.room-entries');
+    roomEntries.slice().reverse().forEach(e=>{
+      const div = document.createElement('div');
+      div.className = 'entry';
+      div.innerHTML = `
+        <img src="${e.photo}">
+        <div style="flex:1;">
+          <div class="meta">No. ${pad3(e.index)} — ${new Date(e.time).toLocaleString()}</div>
+          <div class="note">${e.note ? e.note.replace(/</g,'&lt;') : '<span style="color:#6b6858">(no note)</span>'}</div>
+          <button class="del" data-idx="${e.index}">remove</button>
+        </div>`;
+      list.appendChild(div);
+    });
+    roomGroups.appendChild(group);
+  });
+
+  roomGroups.querySelectorAll('.del').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const idx = btn.getAttribute('data-idx');
+      try{ await store.del('entry:'+idx); }catch(e){}
+      entries = entries.filter(e=>String(e.index) !== String(idx));
+      logTabCount.textContent = entries.length;
+      refreshRoomList();
+      renderLog();
+    });
+  });
+  roomGroups.querySelectorAll('.room-export').forEach(btn=>{
+    btn.addEventListener('click', ()=> exportRoomZip(btn.getAttribute('data-room')));
+  });
+}
+
+// ---------- photo capture: read, auto-rotate per EXIF orientation, compress ----------
+// Reads a File (e.g. straight from the camera) into a base64 data: URL.
+function readAsDataURL(file){
+  return new Promise((resolve,reject)=>{
+    const r = new FileReader();
+    r.onload = e=>resolve(e.target.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+// Loads a data: URL (or any src) into an <img>, resolving once it's decoded
+// and ready to be drawn onto a canvas.
+function loadImage(src){
+  return new Promise((resolve,reject)=>{
+    const img = new Image();
+    img.onload = ()=>resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+// Takes the raw photo file straight from the camera and produces an
+// upright, size-capped JPEG data: URL:
+//  1. reads the original EXIF orientation tag (phones often save portrait
+//     photos "sideways" and rely on that tag to display them correctly —
+//     but re-encoding through a canvas drops that tag, so we bake the
+//     rotation into the pixels ourselves instead)
+//  2. draws it onto a canvas at the corrected rotation and at PHOTO_MAX_W
+async function compressAndOrient(file){
+  const dataUrl = await readAsDataURL(file);
+  let orientation = 1;
+  try{
+    const exif = piexif.load(dataUrl);
+    if(exif && exif['0th'] && exif['0th'][piexif.ImageIFD.Orientation]){
+      orientation = exif['0th'][piexif.ImageIFD.Orientation];
+    }
+  }catch(e){ orientation = 1; }
+
+  const img = await loadImage(dataUrl);
+  const maxW = PHOTO_MAX_W;
+  const scale = Math.min(1, maxW/img.width);
+  const w = img.width*scale, h = img.height*scale;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  // orientations 5-8 are the 90°/270°-rotated cases, where width and height swap
+  const swap = [5,6,7,8].indexOf(orientation) !== -1;
+  canvas.width = swap ? h : w;
+  canvas.height = swap ? w : h;
+
+  // Standard EXIF orientation → canvas transform matrix lookup (values 2-8;
+  // 1 is "already upright" and needs no transform). Each case flips/rotates
+  // the coordinate space before we draw, so the pixels end up right-side-up
+  // with no orientation tag needed afterward.
+  switch(orientation){
+    case 2: ctx.transform(-1,0,0,1,w,0); break;
+    case 3: ctx.transform(-1,0,0,-1,w,h); break;
+    case 4: ctx.transform(1,0,0,-1,0,h); break;
+    case 5: ctx.transform(0,1,1,0,0,0); break;
+    case 6: ctx.transform(0,1,-1,0,h,0); break;
+    case 7: ctx.transform(0,-1,-1,0,h,w); break;
+    case 8: ctx.transform(0,-1,1,0,0,w); break;
+    default: break;
+  }
+  ctx.drawImage(img,0,0,w,h);
+  return canvas.toDataURL('image/jpeg', PHOTO_QUALITY); // final compressed, upright photo
+}
+
+// ---------- burn a readable caption directly into the photo pixels ----------
+async function annotatePhoto(dataUrl, note){
+  if(!note) return dataUrl; // nothing to burn in — EXIF alone still carries an empty note
+  const img = await loadImage(dataUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+
+  const targetAreaFraction = 0.25; // what a ~2-sentence note should roughly occupy
+  const maxTextWidth = img.width * 0.90;
+  const minFont = img.height * 0.028; // floor so text never goes illegibly small
+  const maxFont = img.height * 0.09;  // ceiling so a one-word note doesn't take over the photo
+  const targetArea = img.width * img.height * targetAreaFraction;
+
+  function wrapAtFontSize(fontSize){
+    ctx.font = '700 ' + fontSize + 'px Arial, sans-serif';
+    const words = note.split(/\s+/);
+    const lines = [];
+    let line = '';
+    for(const w of words){
+      const test = line ? line + ' ' + w : w;
+      if(ctx.measureText(test).width > maxTextWidth && line){
+        lines.push(line);
+        line = w;
+      } else {
+        line = test;
+      }
+    }
+    if(line) lines.push(line);
+    return lines;
+  }
+
+  // binary-search the font size that makes the wrapped block hit ~25% of frame area
+  let lo = minFont, hi = maxFont, fontSize = minFont;
+  for(let i=0;i<14;i++){
+    const mid = (lo+hi)/2;
+    const lines = wrapAtFontSize(mid);
+    const lineHeight = mid * 1.28;
+    const area = maxTextWidth * (lines.length * lineHeight);
+    fontSize = mid;
+    if(area < targetArea){ lo = mid; } else { hi = mid; }
+  }
+  fontSize = Math.min(maxFont, Math.max(minFont, fontSize));
+
+  // FONT SIZE: apply the hand-tunable scale from the settings block above,
+  // then re-wrap the text since a smaller/larger font changes how many
+  // words fit per line.
+  fontSize = fontSize * ANNOTATION_FONT_SCALE;
+
+  const lines = wrapAtFontSize(fontSize);
+  const lineHeight = fontSize * 1.28;
+  const blockHeight = lines.length * lineHeight;
+  const paddingBottom = img.height * 0.035;
+  let y = img.height - paddingBottom - blockHeight + lineHeight * 0.8;
+
+  ctx.font = '700 ' + fontSize + 'px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
+  ctx.lineWidth = fontSize * 0.16;
+  ctx.strokeStyle = '#000000';
+  ctx.fillStyle = '#ffffff';
+
+  const cx = img.width / 2;
+  lines.forEach(line=>{
+    ctx.strokeText(line, cx, y);
+    ctx.fillText(line, cx, y);
+    y += lineHeight;
+  });
+
+  return canvas.toDataURL('image/jpeg', PHOTO_QUALITY);
+}
+
+// ---------- EXIF write ----------
+function embedNoteAsExif(jpegDataUrl, note){
+  try{
+    const exifObj = {"0th":{}, "Exif":{}, "GPS":{}};
+    // ASCII-encoded UserComment per EXIF spec: 8-byte code header + text
+    exifObj["Exif"][piexif.ExifIFD.UserComment] = "ASCII\u0000\u0000\u0000" + (note || '');
+    const exifBytes = piexif.dump(exifObj);
+    return piexif.insert(exifBytes, jpegDataUrl);
+  }catch(e){
+    console.error('EXIF embed failed, saving photo without it', e);
+    return jpegDataUrl;
+  }
+}
+
+// Fires when the camera/photo picker returns a photo. Compresses+orients it,
+// shows the preview, and jumps focus straight to the note box so the next
+// action is just typing (or tapping the keyboard's mic key to dictate).
+fileInput.addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  photoSlot.innerHTML = '<div class="hint">Processing photo…</div>';
+  try{
+    currentPhoto = await compressAndOrient(file);
+  }catch(err){
+    showToast('Could not read that photo — try again');
+    photoSlot.innerHTML = '<div class="hint">Tap below to photograph the item</div>';
+    return;
+  }
+  photoSlot.innerHTML = '';
+  const img = document.createElement('img');
+  img.src = currentPhoto;
+  photoSlot.appendChild(img);
+  updateSaveState();
+  noteBox.focus();
+});
+
+noteBox.addEventListener('input', updateSaveState);
+roomInput.addEventListener('input', updateCountLabel);
+function updateSaveState(){ saveBtn.disabled = !currentPhoto; }
+
+// Save & Next: burns the note into the photo's pixels, embeds the same note
+// in EXIF, writes the entry to storage, then resets the capture screen for
+// the next item.
+saveBtn.addEventListener('click', async ()=>{
+  if(!currentPhoto) return;
+  const note = noteBox.value.trim();
+  const room = roomInput.value.trim() || DEFAULT_ROOM;
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+  let photoWithExif;
+  try{
+    const annotated = await annotatePhoto(currentPhoto, note);
+    photoWithExif = embedNoteAsExif(annotated, note);
+  }catch(e){
+    console.error('Annotation failed, saving plain photo', e);
+    photoWithExif = embedNoteAsExif(currentPhoto, note);
+  }
+  const entry = { index: nextIndex, photo: photoWithExif, note, room, time: Date.now() };
+  try{
+    await store.set('entry:'+entry.index, entry);
+    entries.push(entry);
+  }catch(e){
+    console.error('Save failed:', e);
+    const full = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message||''));
+    showToast(full ? 'Storage full — export a zip, then remove some items' : 'Save failed: ' + (e && e.message ? e.message : 'unknown error'));
+    saveBtn.textContent = '✔ Save & Next';
+    saveBtn.disabled = !currentPhoto;
+    return;
+  }
+  localStorage.setItem(LAST_ROOM_KEY, room);
+  showToast('Saved to ' + room + ' — No. ' + pad3(entry.index));
+  nextIndex += 1;
+  refreshRoomList();
+  logTabCount.textContent = entries.length;
+  renderLog();
+  saveBtn.textContent = '✔ Save & Next';
+  resetCaptureUI();
+});
+
+// Clears the capture screen back to its empty state, ready for the next item.
+function resetCaptureUI(){
+  currentPhoto = null;
+  fileInput.value = '';
+  photoSlot.innerHTML = '<div class="hint">Tap below to photograph the item</div>';
+  noteBox.value = '';
+  saveBtn.textContent = '✔ Save & Next';
+  updateSaveState();
+  updateCountLabel();
+}
+
+// ---------- tab switching ----------
+tabCapture.addEventListener('click', ()=>{
+  tabCapture.classList.add('active'); tabLog.classList.remove('active');
+  captureView.style.display='flex'; logView.style.display='none';
+});
+tabLog.addEventListener('click', ()=>{
+  tabLog.classList.add('active'); tabCapture.classList.remove('active');
+  logView.style.display='block'; captureView.style.display='none';
+  renderLog();
+});
+
+// ---------- exporting ----------
+// Plain-text copy of every note (no photos) — a quick way to review or
+// paste the whole log elsewhere.
+exportTextBtn.addEventListener('click', async ()=>{
+  const lines = entries.map(e=>`No. ${pad3(e.index)} — ${new Date(e.time).toLocaleString()}\n${e.note || '(no note)'}\n`);
+  const text = lines.join('\n');
+  try{
+    await navigator.clipboard.writeText(text);
+    showToast('Log copied to clipboard');
+  }catch(e){
+    showToast('Copy failed — select text manually');
+  }
+});
+
+// Strips characters that aren't safe in a filename, for turning a room
+// name into e.g. "Kitchen.zip".
+function sanitizeFilename(name){
+  return name.replace(/[\\/:*?"<>|]/g, '-').trim() || 'Unsorted';
+}
+
+// Adds one numbered .jpg per entry (001.jpg, 002.jpg, ...) into the given
+// zip/folder, in the order the photos were taken.
+async function buildRoomZipEntries(zip, folder, roomEntries){
+  roomEntries
+    .slice()
+    .sort((a,b)=>a.index-b.index)
+    .forEach((e,i)=>{
+      const base64 = e.photo.split(',')[1];
+      folder.file(pad3(i+1)+'.jpg', base64, {base64:true});
+    });
+}
+
+// Hands a finished zip off to the user. Prefers Android's native share
+// sheet (navigator.share) over a plain <a download> link, because a plain
+// download link can get silently blocked on mobile once enough time has
+// passed since the user's last tap — the share sheet has no such limit,
+// and it also lets the user pick exactly where the file goes (Files,
+// Drive, etc.) instead of guessing afterward.
+async function downloadBlob(blob, filename){
+  try{
+    const file = new File([blob], filename, {type: 'application/zip'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file], title: filename});
+      return;
+    }
+  }catch(shareErr){
+    // user cancelled the share sheet, or sharing isn't available here — fall back below
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+}
+
+// Exports just one room's photos as its own zip (e.g. "Kitchen.zip").
+async function exportRoomZip(room){
+  const roomEntries = entries.filter(e=>roomOf(e)===room);
+  if(!roomEntries.length){ showToast('Nothing in ' + room + ' yet'); return; }
+  if(typeof JSZip === 'undefined'){ showToast('Zip library failed to load — check connection'); return; }
+  showToast('Building ' + room + ' zip…');
+  try{
+    const zip = new JSZip();
+    await buildRoomZipEntries(zip, zip, roomEntries);
+    const blob = await zip.generateAsync({type:'blob'});
+    await downloadBlob(blob, sanitizeFilename(room) + '.zip');
+    showToast(room + ' zip ready');
+  }catch(e){
+    console.error(e);
+    showToast('Export failed — see console');
+  }
+}
+
+// Exports everything at once as a single zip, with one subfolder per room.
+exportAllBtn.addEventListener('click', async ()=>{
+  if(!entries.length){ showToast('Nothing to export yet'); return; }
+  if(typeof JSZip === 'undefined'){ showToast('Zip library failed to load — check connection'); return; }
+  showToast('Building zip of all rooms…');
+  try{
+    const zip = new JSZip();
+    const rooms = distinctRooms();
+    for(const room of rooms){
+      const roomEntries = entries.filter(e=>roomOf(e)===room);
+      const folder = zip.folder(sanitizeFilename(room));
+      await buildRoomZipEntries(zip, folder, roomEntries);
+    }
+    const blob = await zip.generateAsync({type:'blob'});
+    await downloadBlob(blob, 'packing-log-all-rooms.zip');
+    showToast('Zip ready');
+  }catch(e){
+    console.error(e);
+    showToast('Export failed — see console');
+  }
+});
+
+// ---------- startup ----------
+// Runs once when the page loads: figures out which storage backend
+// actually works here, adjusts photo size/quality accordingly, and then
+// loads whatever was already saved.
+async function init(){
+  storageBackend = await detectStorageBackend();
+  const notice = document.getElementById('storageNotice');
+  if(storageBackend === 'ls'){
+    PHOTO_MAX_W = 1000;
+    PHOTO_QUALITY = 0.7;
+    notice.style.display = 'block';
+    notice.textContent = '⚠ Running in limited storage mode (this page was likely opened as a local file rather than a real web address). Photos are saved smaller, and you\u2019ll have room for roughly 15–20 items total before storage fills up — export a .zip of each room as you go, and remove saved items from the Log tab afterward to free up space. Hosting this page at a real https:// address removes this limit entirely.';
+  } else {
+    notice.style.display = 'none';
+  }
+  await loadEntries();
+}
+init();
+</script>
+</body>
+</html>
