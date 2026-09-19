@@ -58,19 +58,15 @@
     background:var(--tag); color:#1b1a18; font-family:var(--mono); font-size:11px;
     letter-spacing:1px; padding:3px 10px; border-radius:2px; font-weight:bold;
   }
-  .room-row{margin-top:0;}
-  .room-row label{font-family:var(--mono); font-size:11px; letter-spacing:1px; text-transform:uppercase; color:#6b6858;}
-  #roomInput{
-    width:100%; margin-top:4px; padding:12px; font-family:var(--serif); font-size:16px;
-    border:1px solid var(--paper-line); border-radius:2px; background:#fff; color:#2a2620;
-  }
 
   .photo-slot{
     flex:1; min-height:220px; border:1.5px dashed var(--paper-line); border-radius:2px;
-    display:flex; align-items:center; justify-content:center; overflow:hidden; margin-top:10px;
+    display:flex; align-items:center; justify-content:center; overflow:hidden;
     background:#e4dcc7; position:relative;
   }
-  .photo-slot img{width:100%; height:100%; object-fit:cover; display:block;}
+  /* object-fit:contain (not cover) so the preview always shows the photo's
+     true aspect ratio — letterboxed if needed, never stretched/cropped. */
+  .photo-slot img{width:100%; height:100%; object-fit:contain; display:block;}
   .photo-slot .hint{font-family:var(--mono); font-size:12px; color:#9a9075; text-align:center; padding:20px;}
   input[type=file]{
     position:absolute; width:1px; height:1px; padding:0; margin:-1px;
@@ -83,10 +79,12 @@
   }
   .shutter:active{background:#000;}
 
+  /* 5-line note area: sized in em so it scales with font-size rather than
+     a fixed pixel guess. ~1.5 line-height * 5 lines + a little breathing room. */
   #noteBox{
     margin-top:14px; width:100%; font-family:var(--serif); font-size:16px; padding:10px;
     border:1px solid var(--paper-line); border-radius:2px; background:#fff; color:#2a2620;
-    resize:vertical; min-height:70px;
+    resize:vertical; min-height:8.5em; line-height:1.5;
   }
   .note-hint{font-family:var(--mono); font-size:11px; color:#9a9075; margin-top:6px;}
 
@@ -99,18 +97,6 @@
   /* --- LOG VIEW --- */
   .entry{
     display:flex; gap:12px; padding:12px 0; border-bottom:1px solid #35322d;
-  }
-  .room-group{margin-top:18px;}
-  .room-group:first-child{margin-top:0;}
-  .room-header{
-    display:flex; align-items:center; justify-content:space-between; gap:10px;
-    padding:8px 0; border-bottom:1px solid var(--tag);
-  }
-  .room-header .name{font-family:var(--mono); font-size:13px; letter-spacing:1px; text-transform:uppercase; color:var(--tag);}
-  .room-header .count{font-family:var(--mono); font-size:11px; color:#8a8577;}
-  .room-export{
-    background:none; border:1px solid #4a463c; color:var(--ink); font-family:var(--mono);
-    font-size:10px; letter-spacing:1px; text-transform:uppercase; padding:6px 10px; border-radius:2px;
   }
   .entry img{width:64px; height:64px; object-fit:cover; border-radius:2px; flex-shrink:0; background:#333;}
   .entry .meta{font-family:var(--mono); font-size:10px; color:var(--tag); letter-spacing:1px;}
@@ -147,28 +133,23 @@
 <main>
   <!-- CAPTURE VIEW -->
   <div id="captureView" class="card" data-tag="specimen">
-    <div class="room-row">
-      <label for="roomInput">Room / area</label>
-      <input id="roomInput" list="roomList" placeholder="e.g. Kitchen" autocomplete="off">
-      <datalist id="roomList"></datalist>
-    </div>
     <div class="photo-slot" id="photoSlot">
       <div class="hint">Tap below to photograph the item</div>
     </div>
     <input type="file" id="fileInput" accept="image/*" capture="environment">
     <label class="shutter" for="fileInput" id="shutterBtn">📷 Photograph item</label>
 
-    <textarea id="noteBox" placeholder="Type a note — or tap the mic icon on your keyboard to dictate"></textarea>
-    <div class="note-hint">Note gets saved directly into the photo's file (EXIF).</div>
+    <textarea id="noteBox" rows="5" placeholder="Type a note — or tap the mic icon on your keyboard to dictate"></textarea>
+    <div class="note-hint">Full note is saved into the photo's file (EXIF). Only the first 5 lines are burned onto the photo itself.</div>
 
     <button class="btn-save" id="saveBtn" disabled>✔ Save & Next</button>
   </div>
 
   <!-- LOG VIEW -->
   <div id="logView" style="display:none; flex:1; overflow-y:auto;">
-    <button class="export-btn primary" id="exportAllBtn">⬇ Export all rooms as .zip</button>
+    <button class="export-btn primary" id="exportAllBtn">⬇ Export all as .zip</button>
     <button class="export-btn" id="exportTextBtn">Copy full log as text</button>
-    <div id="roomGroups" style="margin-top:6px;"></div>
+    <div id="entryList" style="margin-top:6px;"></div>
     <div class="empty" id="emptyMsg">No items logged yet.</div>
   </div>
 </main>
@@ -179,8 +160,6 @@
 const photoSlot = document.getElementById('photoSlot');
 const fileInput = document.getElementById('fileInput');
 const noteBox = document.getElementById('noteBox');
-const roomInput = document.getElementById('roomInput');
-const roomList = document.getElementById('roomList');
 const saveBtn = document.getElementById('saveBtn');
 const countLabel = document.getElementById('countLabel');
 const logTabCount = document.getElementById('logTabCount');
@@ -188,14 +167,11 @@ const tabCapture = document.getElementById('tabCapture');
 const tabLog = document.getElementById('tabLog');
 const captureView = document.getElementById('captureView');
 const logView = document.getElementById('logView');
-const roomGroups = document.getElementById('roomGroups');
+const entryList = document.getElementById('entryList');
 const emptyMsg = document.getElementById('emptyMsg');
 const exportAllBtn = document.getElementById('exportAllBtn');
 const exportTextBtn = document.getElementById('exportTextBtn');
 const toast = document.getElementById('toast');
-
-const LAST_ROOM_KEY = 'packinglog:lastRoom';
-const DEFAULT_ROOM = 'Unsorted';
 
 // ============================================================
 // TUNABLE SETTINGS — safe to hand-edit these values directly.
@@ -203,11 +179,13 @@ const DEFAULT_ROOM = 'Unsorted';
 let PHOTO_MAX_W = 1600;   // max photo width in pixels before saving (bigger = sharper but larger files)
 let PHOTO_QUALITY = 0.82; // JPEG quality 0..1 (bigger = sharper but larger files)
 
-// FONT SIZE: multiplier applied to the caption text burned onto each photo.
-// 1.0 = the original default sizing (a ~2-sentence note fills roughly a
-// quarter of the frame). Lower this number to shrink the caption further,
-// raise it to make captions bigger. Currently set to a third of default size.
-const ANNOTATION_FONT_SCALE = 1/3;
+// FONT SIZE: the burned-in caption's text height, as a fraction of the
+// photo's own height. 1/32 means, e.g., a 1600px-tall photo gets ~50px text.
+const ANNOTATION_FONT_HEIGHT_FRACTION = 1/32;
+// Caption is capped at this many visible lines (the full note always still
+// goes into EXIF regardless of this limit — this only affects what's drawn
+// on top of the photo).
+const ANNOTATION_MAX_LINES = 5;
 
 let currentPhoto = null; // upright, compressed JPEG data URL (no EXIF yet)
 let entries = [];
@@ -219,6 +197,15 @@ function showToast(msg){
   setTimeout(()=>toast.classList.remove('show'), 1600);
 }
 function pad3(n){ return String(n).padStart(3,'0'); }
+
+// Produces a sortable, filesystem-safe timestamp like "2026_10_31_222135"
+// (year_month_day_HHMMSS) — used for the exported zip's filename.
+function timestampString(d){
+  d = d || new Date();
+  const p2 = n => String(n).padStart(2,'0');
+  return d.getFullYear() + '_' + p2(d.getMonth()+1) + '_' + p2(d.getDate())
+    + '_' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
+}
 
 // ---------- storage (IndexedDB via idb-keyval; localStorage as a verified fallback) ----------
 // IMPORTANT: checking `typeof idbKeyval !== 'undefined'` only proves the LIBRARY loaded —
@@ -272,38 +259,13 @@ const store = {
   }
 };
 
-// ---------- rooms: every entry carries a free-text "room" tag ----------
-function roomOf(e){ return (e.room && e.room.trim()) || DEFAULT_ROOM; }
-
-// All room names currently in use, in first-seen order — powers both the
-// autocomplete suggestions and the Log tab's grouping.
-function distinctRooms(){
-  const seen = [];
-  entries.forEach(e=>{ const r = roomOf(e); if(seen.indexOf(r)===-1) seen.push(r); });
-  return seen;
-}
-
-// Keeps the <datalist> under the room input up to date so previously-used
-// room names show up as tap-to-fill suggestions.
-function refreshRoomList(){
-  roomList.innerHTML = '';
-  distinctRooms().forEach(r=>{
-    const opt = document.createElement('option');
-    opt.value = r;
-    roomList.appendChild(opt);
-  });
-}
-
-// Live "Kitchen — No. 004" style label, based on how many items already
-// exist in whatever room is currently typed into the room field.
+// Simple "No. 004" counter based on how many items exist so far.
 function updateCountLabel(){
-  const room = (roomInput.value.trim() || DEFAULT_ROOM);
-  const countInRoom = entries.filter(e=>roomOf(e)===room).length + 1;
-  countLabel.textContent = room + ' — No. ' + pad3(countInRoom);
+  countLabel.textContent = 'No. ' + pad3(nextIndex);
 }
 
 // Pulls every saved entry back out of storage on startup and rebuilds
-// in-memory state (entries[], the next unique index, room list, etc).
+// in-memory state (entries[], the next unique index).
 async function loadEntries(){
   let keys = [];
   try{ keys = await store.keys(); }catch(e){ keys = []; }
@@ -319,60 +281,37 @@ async function loadEntries(){
   entries = loaded;
   nextIndex = entries.length ? entries[entries.length-1].index+1 : 1;
   logTabCount.textContent = entries.length;
-  refreshRoomList();
-  roomInput.value = localStorage.getItem(LAST_ROOM_KEY) || ''; // resume last-used room
   updateCountLabel();
   renderLog();
 }
 
-// Rebuilds the Log tab: one collapsible-looking group per room, each with
-// its own item count, its own "Export .zip" button, and a delete control
-// on every entry.
+// Rebuilds the Log tab: a flat, newest-first list of every saved item,
+// each with a delete control.
 function renderLog(){
-  roomGroups.innerHTML = '';
+  entryList.innerHTML = '';
   emptyMsg.style.display = entries.length ? 'none' : 'block';
 
-  const rooms = distinctRooms();
-  rooms.forEach(room=>{
-    const roomEntries = entries.filter(e=>roomOf(e)===room);
-    const group = document.createElement('div');
-    group.className = 'room-group';
-    const safeRoom = room.replace(/</g,'&lt;');
-    group.innerHTML = `
-      <div class="room-header">
-        <span class="name">${safeRoom}</span>
-        <span class="count">${roomEntries.length} item${roomEntries.length===1?'':'s'}</span>
-        <button class="room-export" data-room="${safeRoom}">Export .zip</button>
-      </div>
-      <div class="room-entries"></div>`;
-    const list = group.querySelector('.room-entries');
-    roomEntries.slice().reverse().forEach(e=>{
-      const div = document.createElement('div');
-      div.className = 'entry';
-      div.innerHTML = `
-        <img src="${e.photo}">
-        <div style="flex:1;">
-          <div class="meta">No. ${pad3(e.index)} — ${new Date(e.time).toLocaleString()}</div>
-          <div class="note">${e.note ? e.note.replace(/</g,'&lt;') : '<span style="color:#6b6858">(no note)</span>'}</div>
-          <button class="del" data-idx="${e.index}">remove</button>
-        </div>`;
-      list.appendChild(div);
-    });
-    roomGroups.appendChild(group);
+  entries.slice().reverse().forEach(e=>{
+    const div = document.createElement('div');
+    div.className = 'entry';
+    div.innerHTML = `
+      <img src="${e.photo}">
+      <div style="flex:1;">
+        <div class="meta">No. ${pad3(e.index)} — ${new Date(e.time).toLocaleString()}</div>
+        <div class="note">${e.note ? e.note.replace(/</g,'&lt;') : '<span style="color:#6b6858">(no note)</span>'}</div>
+        <button class="del" data-idx="${e.index}">remove</button>
+      </div>`;
+    entryList.appendChild(div);
   });
 
-  roomGroups.querySelectorAll('.del').forEach(btn=>{
+  entryList.querySelectorAll('.del').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const idx = btn.getAttribute('data-idx');
       try{ await store.del('entry:'+idx); }catch(e){}
       entries = entries.filter(e=>String(e.index) !== String(idx));
       logTabCount.textContent = entries.length;
-      refreshRoomList();
       renderLog();
     });
-  });
-  roomGroups.querySelectorAll('.room-export').forEach(btn=>{
-    btn.addEventListener('click', ()=> exportRoomZip(btn.getAttribute('data-room')));
   });
 }
 
@@ -445,6 +384,11 @@ async function compressAndOrient(file){
 }
 
 // ---------- burn a readable caption directly into the photo pixels ----------
+// Font size is fixed at ANNOTATION_FONT_HEIGHT_FRACTION of the photo's own
+// height (see FONT SIZE setting above) — it does NOT grow/shrink based on
+// how much text there is. Longer notes just wrap onto more lines instead,
+// up to ANNOTATION_MAX_LINES; anything beyond that is cut off with "..."
+// on the photo, though the FULL note still goes into EXIF regardless.
 async function annotatePhoto(dataUrl, note){
   if(!note) return dataUrl; // nothing to burn in — EXIF alone still carries an empty note
   const img = await loadImage(dataUrl);
@@ -454,66 +398,54 @@ async function annotatePhoto(dataUrl, note){
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0);
 
-  const targetAreaFraction = 0.25; // what a ~2-sentence note should roughly occupy
   const maxTextWidth = img.width * 0.90;
-  const minFont = img.height * 0.028; // floor so text never goes illegibly small
-  const maxFont = img.height * 0.09;  // ceiling so a one-word note doesn't take over the photo
-  const targetArea = img.width * img.height * targetAreaFraction;
+  const fontSize = img.height * ANNOTATION_FONT_HEIGHT_FRACTION; // FONT SIZE — see setting above
 
-  function wrapAtFontSize(fontSize){
-    ctx.font = '700 ' + fontSize + 'px Arial, sans-serif';
-    const words = note.split(/\s+/);
-    const lines = [];
-    let line = '';
-    for(const w of words){
-      const test = line ? line + ' ' + w : w;
-      if(ctx.measureText(test).width > maxTextWidth && line){
-        lines.push(line);
-        line = w;
-      } else {
-        line = test;
-      }
+  ctx.font = '700 ' + fontSize + 'px Arial, sans-serif';
+
+  // word-wrap the note at this fixed font size
+  const words = note.split(/\s+/);
+  let lines = [];
+  let line = '';
+  for(const w of words){
+    const test = line ? line + ' ' + w : w;
+    if(ctx.measureText(test).width > maxTextWidth && line){
+      lines.push(line);
+      line = w;
+    } else {
+      line = test;
     }
-    if(line) lines.push(line);
-    return lines;
+  }
+  if(line) lines.push(line);
+
+  // cap at ANNOTATION_MAX_LINES visible lines; mark truncation with "..."
+  // trimmed to fit the same max width as everything else.
+  if(lines.length > ANNOTATION_MAX_LINES){
+    lines = lines.slice(0, ANNOTATION_MAX_LINES);
+    let lastLine = lines[ANNOTATION_MAX_LINES-1];
+    while(lastLine.length > 0 && ctx.measureText(lastLine + '...').width > maxTextWidth){
+      lastLine = lastLine.slice(0, -1).trimEnd();
+    }
+    lines[ANNOTATION_MAX_LINES-1] = lastLine + '...';
   }
 
-  // binary-search the font size that makes the wrapped block hit ~25% of frame area
-  let lo = minFont, hi = maxFont, fontSize = minFont;
-  for(let i=0;i<14;i++){
-    const mid = (lo+hi)/2;
-    const lines = wrapAtFontSize(mid);
-    const lineHeight = mid * 1.28;
-    const area = maxTextWidth * (lines.length * lineHeight);
-    fontSize = mid;
-    if(area < targetArea){ lo = mid; } else { hi = mid; }
-  }
-  fontSize = Math.min(maxFont, Math.max(minFont, fontSize));
-
-  // FONT SIZE: apply the hand-tunable scale from the settings block above,
-  // then re-wrap the text since a smaller/larger font changes how many
-  // words fit per line.
-  fontSize = fontSize * ANNOTATION_FONT_SCALE;
-
-  const lines = wrapAtFontSize(fontSize);
   const lineHeight = fontSize * 1.28;
   const blockHeight = lines.length * lineHeight;
   const paddingBottom = img.height * 0.035;
   let y = img.height - paddingBottom - blockHeight + lineHeight * 0.8;
 
-  ctx.font = '700 ' + fontSize + 'px Arial, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   ctx.lineJoin = 'round';
   ctx.miterLimit = 2;
   ctx.lineWidth = fontSize * 0.16;
-  ctx.strokeStyle = '#000000';
+  ctx.strokeStyle = '#000000'; // black outline + white fill: readable against any background
   ctx.fillStyle = '#ffffff';
 
   const cx = img.width / 2;
-  lines.forEach(line=>{
-    ctx.strokeText(line, cx, y);
-    ctx.fillText(line, cx, y);
+  lines.forEach(l=>{
+    ctx.strokeText(l, cx, y);
+    ctx.fillText(l, cx, y);
     y += lineHeight;
   });
 
@@ -521,6 +453,8 @@ async function annotatePhoto(dataUrl, note){
 }
 
 // ---------- EXIF write ----------
+// Always embeds the FULL, untruncated note — independent of whatever
+// got cut off in the on-photo caption above.
 function embedNoteAsExif(jpegDataUrl, note){
   try{
     const exifObj = {"0th":{}, "Exif":{}, "GPS":{}};
@@ -557,16 +491,14 @@ fileInput.addEventListener('change', async (e)=>{
 });
 
 noteBox.addEventListener('input', updateSaveState);
-roomInput.addEventListener('input', updateCountLabel);
 function updateSaveState(){ saveBtn.disabled = !currentPhoto; }
 
-// Save & Next: burns the note into the photo's pixels, embeds the same note
-// in EXIF, writes the entry to storage, then resets the capture screen for
-// the next item.
+// Save & Next: burns the (up to 5-line) note into the photo's pixels,
+// embeds the FULL note in EXIF, writes the entry to storage, then resets
+// the capture screen for the next item.
 saveBtn.addEventListener('click', async ()=>{
   if(!currentPhoto) return;
   const note = noteBox.value.trim();
-  const room = roomInput.value.trim() || DEFAULT_ROOM;
   saveBtn.disabled = true;
   saveBtn.textContent = 'Saving…';
   let photoWithExif;
@@ -577,7 +509,7 @@ saveBtn.addEventListener('click', async ()=>{
     console.error('Annotation failed, saving plain photo', e);
     photoWithExif = embedNoteAsExif(currentPhoto, note);
   }
-  const entry = { index: nextIndex, photo: photoWithExif, note, room, time: Date.now() };
+  const entry = { index: nextIndex, photo: photoWithExif, note, time: Date.now() };
   try{
     await store.set('entry:'+entry.index, entry);
     entries.push(entry);
@@ -589,10 +521,8 @@ saveBtn.addEventListener('click', async ()=>{
     saveBtn.disabled = !currentPhoto;
     return;
   }
-  localStorage.setItem(LAST_ROOM_KEY, room);
-  showToast('Saved to ' + room + ' — No. ' + pad3(entry.index));
+  showToast('Saved — No. ' + pad3(entry.index));
   nextIndex += 1;
-  refreshRoomList();
   logTabCount.textContent = entries.length;
   renderLog();
   saveBtn.textContent = '✔ Save & Next';
@@ -635,21 +565,15 @@ exportTextBtn.addEventListener('click', async ()=>{
   }
 });
 
-// Strips characters that aren't safe in a filename, for turning a room
-// name into e.g. "Kitchen.zip".
-function sanitizeFilename(name){
-  return name.replace(/[\\/:*?"<>|]/g, '-').trim() || 'Unsorted';
-}
-
-// Adds one numbered .jpg per entry (001.jpg, 002.jpg, ...) into the given
-// zip/folder, in the order the photos were taken.
-async function buildRoomZipEntries(zip, folder, roomEntries){
-  roomEntries
+// Adds one numbered .jpg per entry (001.jpg, 002.jpg, ...) into the zip,
+// in the order the photos were taken.
+function buildZipEntries(zip, allEntries){
+  allEntries
     .slice()
     .sort((a,b)=>a.index-b.index)
-    .forEach((e,i)=>{
+    .forEach(e=>{
       const base64 = e.photo.split(',')[1];
-      folder.file(pad3(i+1)+'.jpg', base64, {base64:true});
+      zip.file(pad3(e.index)+'.jpg', base64, {base64:true});
     });
 }
 
@@ -679,39 +603,18 @@ async function downloadBlob(blob, filename){
   setTimeout(()=>URL.revokeObjectURL(url), 4000);
 }
 
-// Exports just one room's photos as its own zip (e.g. "Kitchen.zip").
-async function exportRoomZip(room){
-  const roomEntries = entries.filter(e=>roomOf(e)===room);
-  if(!roomEntries.length){ showToast('Nothing in ' + room + ' yet'); return; }
-  if(typeof JSZip === 'undefined'){ showToast('Zip library failed to load — check connection'); return; }
-  showToast('Building ' + room + ' zip…');
-  try{
-    const zip = new JSZip();
-    await buildRoomZipEntries(zip, zip, roomEntries);
-    const blob = await zip.generateAsync({type:'blob'});
-    await downloadBlob(blob, sanitizeFilename(room) + '.zip');
-    showToast(room + ' zip ready');
-  }catch(e){
-    console.error(e);
-    showToast('Export failed — see console');
-  }
-}
-
-// Exports everything at once as a single zip, with one subfolder per room.
+// Exports everything as a single zip. Filename is a sortable timestamp
+// (e.g. 2026_10_31_222135.zip) so repeated exports never collide or need
+// manual renaming.
 exportAllBtn.addEventListener('click', async ()=>{
   if(!entries.length){ showToast('Nothing to export yet'); return; }
   if(typeof JSZip === 'undefined'){ showToast('Zip library failed to load — check connection'); return; }
-  showToast('Building zip of all rooms…');
+  showToast('Building zip…');
   try{
     const zip = new JSZip();
-    const rooms = distinctRooms();
-    for(const room of rooms){
-      const roomEntries = entries.filter(e=>roomOf(e)===room);
-      const folder = zip.folder(sanitizeFilename(room));
-      await buildRoomZipEntries(zip, folder, roomEntries);
-    }
+    buildZipEntries(zip, entries);
     const blob = await zip.generateAsync({type:'blob'});
-    await downloadBlob(blob, 'packing-log-all-rooms.zip');
+    await downloadBlob(blob, timestampString() + '.zip');
     showToast('Zip ready');
   }catch(e){
     console.error(e);
@@ -730,7 +633,7 @@ async function init(){
     PHOTO_MAX_W = 1000;
     PHOTO_QUALITY = 0.7;
     notice.style.display = 'block';
-    notice.textContent = '⚠ Running in limited storage mode (this page was likely opened as a local file rather than a real web address). Photos are saved smaller, and you\u2019ll have room for roughly 15–20 items total before storage fills up — export a .zip of each room as you go, and remove saved items from the Log tab afterward to free up space. Hosting this page at a real https:// address removes this limit entirely.';
+    notice.textContent = '⚠ Running in limited storage mode (this page was likely opened as a local file rather than a real web address). Photos are saved smaller, and you\u2019ll have room for roughly 15–20 items total before storage fills up — export a .zip as you go, and remove saved items from the Log tab afterward to free up space. Hosting this page at a real https:// address removes this limit entirely.';
   } else {
     notice.style.display = 'none';
   }
