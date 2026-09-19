@@ -66,7 +66,10 @@
   }
   /* object-fit:contain (not cover) so the preview always shows the photo's
      true aspect ratio — letterboxed if needed, never stretched/cropped. */
-  .photo-slot img{width:100%; height:100%; object-fit:contain; display:block;}
+  .photo-slot img{
+    width:100%; height:100%; object-fit:contain; display:block;
+    transform-origin:0 0; touch-action:none; /* touch-action:none hands the gesture to our own JS instead of the browser's native pinch-zoom */
+  }
   .photo-slot .hint{font-family:var(--mono); font-size:12px; color:#9a9075; text-align:center; padding:20px;}
   input[type=file]{
     position:absolute; width:1px; height:1px; padding:0; margin:-1px;
@@ -220,6 +223,67 @@ const ANNOTATION_MAX_LINES = 5;
 // edit (and re-burning the caption). Short enough to feel instant, long
 // enough not to re-encode the image on every keystroke.
 const NOTE_AUTOSAVE_DELAY_MS = 700;
+const ZOOM_MIN = 1;   // never zoom out past the photo's normal fit-to-box size
+const ZOOM_MAX = 4;   // cap how far in you can pinch-zoom
+
+// ---------- two-finger pinch-zoom / pan on the displayed photo ----------
+// Purely a viewing convenience: it only changes how the <img> is displayed
+// on screen right now (via a CSS transform), never the saved photo data —
+// so it doesn't touch storage, EXIF, annotation, or export at all. Resets
+// to normal (via resetZoom()) every time a different or newly-captured
+// photo is shown, so you never land on a photo still zoomed from before.
+let zoomState = { scale: 1, x: 0, y: 0 };
+let pinchLastDist = 0;
+let pinchLastMid = null;
+
+function resetZoom(){
+  zoomState = { scale: 1, x: 0, y: 0 };
+  applyZoomTransform();
+}
+function applyZoomTransform(){
+  const img = photoSlot.querySelector('img');
+  if(img) img.style.transform = `translate(${zoomState.x}px, ${zoomState.y}px) scale(${zoomState.scale})`;
+}
+function touchDistance(t0, t1){
+  const dx = t0.clientX - t1.clientX, dy = t0.clientY - t1.clientY;
+  return Math.sqrt(dx*dx + dy*dy);
+}
+function touchMidpoint(t0, t1, rect){
+  return { x: (t0.clientX + t1.clientX)/2 - rect.left, y: (t0.clientY + t1.clientY)/2 - rect.top };
+}
+
+photoSlot.addEventListener('touchstart', (e)=>{
+  if(e.touches.length !== 2 || !photoSlot.querySelector('img')) return;
+  e.preventDefault();
+  const rect = photoSlot.getBoundingClientRect();
+  pinchLastDist = touchDistance(e.touches[0], e.touches[1]);
+  pinchLastMid = touchMidpoint(e.touches[0], e.touches[1], rect);
+}, { passive: false });
+
+photoSlot.addEventListener('touchmove', (e)=>{
+  if(e.touches.length !== 2 || !pinchLastMid) return;
+  e.preventDefault();
+  const rect = photoSlot.getBoundingClientRect();
+  const dist = touchDistance(e.touches[0], e.touches[1]);
+  const mid = touchMidpoint(e.touches[0], e.touches[1], rect);
+  const scaleDelta = dist / pinchLastDist;
+
+  // Anchor the zoom at the pinch midpoint: the image point currently under
+  // the fingers stays under the fingers as scale and midpoint both change.
+  const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoomState.scale * scaleDelta));
+  const appliedDelta = newScale / zoomState.scale; // actual delta after clamping
+  zoomState.x = mid.x - (pinchLastMid.x - zoomState.x) * appliedDelta;
+  zoomState.y = mid.y - (pinchLastMid.y - zoomState.y) * appliedDelta;
+  zoomState.scale = newScale;
+
+  pinchLastDist = dist;
+  pinchLastMid = mid;
+  applyZoomTransform();
+}, { passive: false });
+
+photoSlot.addEventListener('touchend', (e)=>{
+  if(e.touches.length < 2) pinchLastMid = null;
+});
 
 // ---------- navigation model ----------
 // `entries` holds every saved item, sorted by capture time. `cursor` always
@@ -540,6 +604,7 @@ function renderCurrentItem(){
     photoSlot.appendChild(img);
     noteBox.value = entry.note || '';
     countLabel.textContent = 'No. ' + entry.id + ' — ' + (cursor+1) + ' of ' + entries.length;
+    resetZoom();
   }
 
   // Forward doubles as "take a new photo" once you're at the newest item.
@@ -800,4 +865,3 @@ init();
 </script>
 </body>
 </html>
-
