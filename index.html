@@ -216,7 +216,7 @@
   <div id="logView" style="display:none; flex:1; overflow-y:auto;">
     <div class="export-row">
       <button type="button" class="export-btn" id="renameBtn">Name Export File</button>
-      <button type="button" class="export-btn primary" id="exportAllBtn">Export as a Zip</button>
+      <button type="button" class="export-btn" id="exportAllBtn">Export as a Zip</button>
       <button type="button" class="export-btn" id="importBtn">Import Folder or Zip as Working Set</button>
     </div>
     <div class="export-row">
@@ -506,7 +506,7 @@ async function loadEntries(){
   for(const k of entryKeys){
     try{
       const e = await store.get(k);
-      if(e) loaded.push(e);
+      if(e) loaded.push(normalizeEntry(e));
     }catch(e){}
   }
   loaded.sort((a,b)=>a.time-b.time);
@@ -515,6 +515,22 @@ async function loadEntries(){
   logTabCount.textContent = entries.length;
   renderLog();
   renderCurrentItem();
+}
+
+// Fills in fields that might be missing on an entry saved under an OLDER
+// version of this app's storage format (this app's schema changed more
+// than once while it was being built — e.g. `basePhoto` and `id` didn't
+// always exist). Without this, an old entry missing a newer field can
+// crash code that assumes every entry has the current shape — which is
+// exactly what was happening: some saved items had no `basePhoto`, and
+// export crashed trying to use one that didn't exist.
+function normalizeEntry(e){
+  if(!e.id) e.id = String(e.index != null ? e.index : Date.now());
+  if(!e.basePhoto) e.basePhoto = e.photo;
+  if(!e.photo) e.photo = e.basePhoto;
+  if(typeof e.note !== 'string') e.note = e.note || '';
+  if(typeof e.time !== 'number') e.time = idToTime(e.id) || Date.now();
+  return e;
 }
 
 // Rebuilds the Log tab: a flat, newest-first list of every saved item,
@@ -948,13 +964,21 @@ exportTextBtn.addEventListener('click', async ()=>{
 function buildZipEntries(zip, allEntries){
   const sorted = allEntries.slice().sort((a,b)=>a.time-b.time);
   sorted.forEach(e=>{
-    const base64 = e.photo.split(',')[1];
-    zip.file('A_'+e.id+'.jpg', base64, {base64:true});
+    try{
+      const base64 = e.photo.split(',')[1];
+      zip.file('A_'+e.id+'.jpg', base64, {base64:true});
+    }catch(err){
+      console.error('Skipped A_ export for', e.id, '— missing/invalid photo data', err);
+    }
   });
   sorted.forEach(e=>{
-    const exifOnly = embedNoteAsExif(e.basePhoto, e.note);
-    const base64 = exifOnly.split(',')[1];
-    zip.file('X_'+e.id+'.jpg', base64, {base64:true});
+    try{
+      const exifOnly = embedNoteAsExif(e.basePhoto, e.note);
+      const base64 = exifOnly.split(',')[1];
+      zip.file('X_'+e.id+'.jpg', base64, {base64:true});
+    }catch(err){
+      console.error('Skipped X_ export for', e.id, '— missing/invalid basePhoto data', err);
+    }
   });
 }
 
