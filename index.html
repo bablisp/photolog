@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -127,17 +126,53 @@
   .entry{
     display:flex; gap:12px; padding:12px 0; border-bottom:1px solid #35322d;
   }
-  .entry img{width:64px; height:64px; object-fit:cover; border-radius:2px; flex-shrink:0; background:#333;}
+  .entry img{width:64px; height:64px; object-fit:cover; border-radius:2px; flex-shrink:0; background:#333; cursor:pointer;}
   .entry .meta{font-family:var(--mono); font-size:10px; color:var(--tag); letter-spacing:1px;}
   .entry .note{font-size:15px; line-height:1.35; margin-top:2px;}
   .entry .del{background:none; border:none; color:#6b6858; font-family:var(--mono); font-size:11px; margin-top:6px;}
+  /* Tapping a thumbnail toggles this on its row: image grows and moves
+     above the note (which shows the full text either way — expanding
+     only changes layout/size, not what text is shown). */
+  .entry.expanded{flex-direction:column;}
+  .entry.expanded img{width:100%; height:auto; max-height:420px; object-fit:contain; background:#e4dcc7;}
   .empty{font-family:var(--mono); color:#6b6858; font-size:13px; text-align:center; margin-top:60px;}
   .export-btn{
-    margin-top:14px; padding:14px; border:1px solid #4a463c; border-radius:2px; background:none;
-    color:var(--ink); font-family:var(--mono); font-size:12px; letter-spacing:1px; text-transform:uppercase;
-    width:100%;
+    padding:10px 5px; border:1px solid #4a463c; border-radius:2px; background:none;
+    color:var(--ink); font-family:var(--mono); font-size:9.5px; letter-spacing:0.3px; line-height:1.3;
+    text-transform:uppercase; text-align:center; cursor:pointer;
   }
   .export-btn.primary{background:var(--tag); color:#1b1a18; border-color:var(--tag); font-weight:bold;}
+  .export-btn.danger{border-color:var(--danger); color:var(--danger);}
+  .export-btn:disabled{opacity:.3; cursor:default;}
+
+  /* Each row holds exactly three equal-width buttons. */
+  .export-row{display:flex; gap:6px; margin-top:14px;}
+  .export-row:first-of-type{margin-top:0;}
+  .export-row .export-btn{flex:1; min-width:0;}
+
+  /* Nuke confirmation, and the import-type choice, both live as centered
+     overlays rather than anything anchored to their trigger button — see
+     the HTML comments above each modal. */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,.72); display:flex;
+    align-items:center; justify-content:center; z-index:1000; padding:24px;
+  }
+  .modal-box{
+    background:var(--paper); color:#2a2620; border-radius:4px; padding:20px;
+    max-width:340px; width:100%; box-shadow:0 12px 40px rgba(0,0,0,.5);
+  }
+  .modal-title{
+    font-family:var(--mono); font-weight:bold; font-size:14px; letter-spacing:1px;
+    text-transform:uppercase; color:var(--danger); margin-bottom:10px;
+  }
+  .modal-body{font-size:14px; line-height:1.5; margin-bottom:18px;}
+  .modal-actions{display:flex; gap:10px;}
+  .modal-btn{
+    flex:1; padding:12px; border:none; border-radius:2px; font-family:var(--mono); font-size:12px;
+    letter-spacing:1px; text-transform:uppercase; background:#ddd3ba; color:#2a2620; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; text-align:center;
+  }
+  .modal-btn.danger{background:var(--danger); color:#fff; font-weight:bold;}
   .toast{
     position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
     background:var(--tag); color:#1b1a18; padding:8px 16px; border-radius:2px;
@@ -150,7 +185,7 @@
 <body>
 
 <header>
-  <div class="title">Accession Log</div>
+  <div class="title" id="headerTitle">Accession Log</div>
   <div class="count" id="countLabel">No. 001</div>
 </header>
 <div id="storageNotice" style="display:none;"></div>
@@ -179,14 +214,54 @@
 
   <!-- LOG VIEW -->
   <div id="logView" style="display:none; flex:1; overflow-y:auto;">
-    <button class="export-btn primary" id="exportAllBtn">⬇ Export all as .zip</button>
-    <button class="export-btn" id="exportTextBtn">Copy full log as text</button>
+    <div class="export-row">
+      <button type="button" class="export-btn" id="renameBtn">Name Export File</button>
+      <button type="button" class="export-btn primary" id="exportAllBtn">Export as a Zip</button>
+      <button type="button" class="export-btn" id="importBtn">Import Folder or Zip as Working Set</button>
+    </div>
+    <div class="export-row">
+      <button type="button" class="export-btn danger" id="nukeBtn">Nuke All Cached Data</button>
+      <button type="button" class="export-btn" id="exportTextBtn">Export Text as .txt and Clipboard</button>
+      <button type="button" class="export-btn" id="reservedBtn" disabled>Reserved</button>
+    </div>
+    <input type="file" id="importFolderInput" webkitdirectory multiple accept="image/*">
+    <input type="file" id="importZipInput" accept=".zip,application/zip">
     <div id="entryList" style="margin-top:6px;"></div>
     <div class="empty" id="emptyMsg">No items logged yet.</div>
   </div>
 </main>
 
 <div class="toast" id="toast"></div>
+
+<!-- Nuke confirmation lives as a centered overlay, deliberately away from
+     the small nuke button itself, so a reflexive second tap in the same
+     spot can't accidentally confirm a destructive action. -->
+<div id="nukeModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-title">Delete everything?</div>
+    <div class="modal-body" id="nukeModalBody"></div>
+    <div class="modal-actions">
+      <button type="button" id="nukeCancelBtn" class="modal-btn">Cancel</button>
+      <button type="button" id="nukeConfirmBtn" class="modal-btn danger">Yes, delete everything</button>
+    </div>
+  </div>
+</div>
+
+<!-- Asks which kind of thing is being imported, since a folder picker and
+     a single-file picker are two different native controls that can't be
+     combined into one. Each option is a label tied to its own hidden
+     input, so opening the native picker stays reliable either way. -->
+<div id="importChoiceModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-title">Import As Working Set</div>
+    <div class="modal-body">This replaces everything currently saved. Choose what you're importing:</div>
+    <div class="modal-actions">
+      <label class="modal-btn" id="importChooseFolder" for="importFolderInput">📁 Folder</label>
+      <label class="modal-btn" id="importChooseZip" for="importZipInput">🗜 Zip File</label>
+    </div>
+    <button type="button" id="importChoiceCancelBtn" class="modal-btn" style="margin-top:10px; width:100%;">Cancel</button>
+  </div>
+</div>
 
 <script>
 const photoSlot = document.getElementById('photoSlot');
@@ -205,6 +280,21 @@ const entryList = document.getElementById('entryList');
 const emptyMsg = document.getElementById('emptyMsg');
 const exportAllBtn = document.getElementById('exportAllBtn');
 const exportTextBtn = document.getElementById('exportTextBtn');
+const renameBtn = document.getElementById('renameBtn');
+const nukeBtn = document.getElementById('nukeBtn');
+const nukeModal = document.getElementById('nukeModal');
+const nukeModalBody = document.getElementById('nukeModalBody');
+const nukeCancelBtn = document.getElementById('nukeCancelBtn');
+const nukeConfirmBtn = document.getElementById('nukeConfirmBtn');
+const importBtn = document.getElementById('importBtn');
+const importFolderInput = document.getElementById('importFolderInput');
+const importZipInput = document.getElementById('importZipInput');
+const importChoiceModal = document.getElementById('importChoiceModal');
+const importChooseFolder = document.getElementById('importChooseFolder');
+const importChooseZip = document.getElementById('importChooseZip');
+const importChoiceCancelBtn = document.getElementById('importChoiceCancelBtn');
+const headerTitle = document.getElementById('headerTitle');
+const reservedBtn = document.getElementById('reservedBtn');
 const toast = document.getElementById('toast');
 
 // ============================================================
@@ -303,6 +393,26 @@ photoSlot.addEventListener('touchend', (e)=>{
 let entries = [];
 let cursor = 0;
 let captureMode = 'new'; // 'new' | 'retake' — set right before the file picker opens
+// Tracks whether the CURRENT set of items has been exported at least once
+// since it last changed. Importing a folder replaces the whole working
+// set, so we require a fresh export first if there's anything at risk of
+// being silently discarded. Set true at the end of a successful zip
+// export; set false by every mutation (new photo, retake, note edit,
+// delete, nuke, import) — see markDataUnexported() below.
+let hasExportedCurrentData = false;
+function markDataUnexported(){ hasExportedCurrentData = false; }
+
+// The header title shows the current export name (set via "Name Export
+// File", or auto-filled from whatever folder/zip you last imported) in
+// place of a generic static title — falls back to "Accession Log" only
+// when nothing has ever been named yet.
+function updateHeaderTitle(){
+  headerTitle.textContent = exportBaseName || 'Accession Log';
+}
+function setExportName(name){
+  exportBaseName = name;
+  updateHeaderTitle();
+}
 let noteSaveTimer = null;
 
 function showToast(msg){
@@ -408,7 +518,9 @@ async function loadEntries(){
 }
 
 // Rebuilds the Log tab: a flat, newest-first list of every saved item,
-// each with a delete control.
+// each with a delete control and a thumbnail that expands in place when
+// tapped (tap again to collapse). The note text shown is always the full
+// text either way — expanding only changes the image size and layout.
 function renderLog(){
   entryList.innerHTML = '';
   emptyMsg.style.display = entries.length ? 'none' : 'block';
@@ -424,6 +536,9 @@ function renderLog(){
         <button class="del" data-idx="${e.id}">remove</button>
       </div>`;
     entryList.appendChild(div);
+    div.querySelector('img').addEventListener('click', ()=>{
+      div.classList.toggle('expanded');
+    });
   });
 
   entryList.querySelectorAll('.del').forEach(btn=>{
@@ -431,6 +546,7 @@ function renderLog(){
       const idx = btn.getAttribute('data-idx');
       try{ await store.del('entry:'+idx); }catch(e){}
       entries = entries.filter(e=>String(e.id) !== String(idx));
+      markDataUnexported();
       cursor = Math.max(0, Math.min(cursor, entries.length - 1));
       logTabCount.textContent = entries.length;
       renderLog();
@@ -640,6 +756,7 @@ async function flushNoteSave(){
 // using whatever's in the note box right now. No-op if there's nothing
 // yet, or the text hasn't actually changed.
 async function commitNoteEdit(){
+  noteSaveTimer = null; // whether this ran via the debounce firing naturally or via an explicit flush, there's no longer a pending timer
   if(entries.length === 0) return;
   const entry = entries[cursor];
   const newNote = noteBox.value.trim();
@@ -653,6 +770,7 @@ async function commitNoteEdit(){
     showToast('Auto-save failed: ' + (e && e.message ? e.message : 'unknown error'));
     return;
   }
+  markDataUnexported();
   // only refresh the visible photo if we're still looking at this same entry
   if(entries[cursor] === entry){
     const img = photoSlot.querySelector('img');
@@ -702,6 +820,7 @@ fileInput.addEventListener('change', async (e)=>{
     }
     entries.push(entry);
     cursor = entries.length - 1; // now viewing the item we just created
+    markDataUnexported();
     showToast('Saved — No. ' + entry.id);
   } else {
     const entry = entries[cursor];
@@ -714,6 +833,7 @@ fileInput.addEventListener('change', async (e)=>{
       console.error(err);
       showToast('Save failed: ' + (err && err.message ? err.message : 'unknown error'));
     }
+    markDataUnexported();
     showToast('Retaken — No. ' + entry.id);
   }
 
@@ -755,9 +875,16 @@ forwardBtn.addEventListener('click', (e)=>{
     return;
   }
   // atEnd: let the native label behavior open the picker; prep state first.
+  // IMPORTANT: flush BEFORE clearing the note box. flushNoteSave() reads
+  // noteBox.value synchronously the moment it's called (before it does any
+  // awaiting), so calling it first captures whatever was just typed for the
+  // item we're leaving. Clearing the note box first was the bug: if there
+  // was an edit still waiting on its debounce, the flush would read the
+  // now-empty box and silently overwrite that item's note (and its burned-in
+  // caption) with nothing.
   captureMode = 'new';
+  flushNoteSave();
   noteBox.value = '';
-  flushNoteSave(); // persists any pending edit on the item we're leaving, without blocking the picker from opening
 });
 
 // ---------- tab switching ----------
@@ -773,41 +900,73 @@ tabLog.addEventListener('click', async ()=>{
 });
 
 // ---------- exporting ----------
-// Plain-text copy of every note (no photos) — a quick way to review or
-// paste the whole log elsewhere.
+// Shared name used for BOTH the exported zip and the exported text log.
+// Empty means "no custom name set yet" — falls back to a fresh timestamp
+// at export time so files still get a sensible, collision-free name.
+let exportBaseName = '';
+
+function exportFileBaseName(){
+  return exportBaseName || timestampString();
+}
+
+renameBtn.addEventListener('click', ()=>{
+  const current = exportFileBaseName();
+  const input = prompt('Name for exported files (no extension):', current);
+  if(input === null) return; // cancelled
+  const cleaned = input.trim().replace(/[\\/:*?"<>|]/g, '-'); // strip characters that aren't safe in a filename
+  if(cleaned) setExportName(cleaned);
+});
+
+// Plain-text copy of every note (no photos) — copies to the clipboard AS
+// BEFORE, and now also saves a .txt file using the shared export name.
 exportTextBtn.addEventListener('click', async ()=>{
+  await flushNoteSave();
   const lines = entries.map(e=>`No. ${e.id} — ${new Date(e.time).toLocaleString()}\n${e.note || '(no note)'}\n`);
   const text = lines.join('\n');
+  let copied = true;
   try{
     await navigator.clipboard.writeText(text);
-    showToast('Log copied to clipboard');
   }catch(e){
-    showToast('Copy failed — select text manually');
+    copied = false;
+  }
+  try{
+    const blob = new Blob([text], {type:'text/plain'});
+    const filename = exportFileBaseName() + '.txt';
+    await downloadBlob(blob, filename, 'text/plain');
+    showToast(copied ? 'Copied and saved as ' + filename : 'Saved as ' + filename + ' (clipboard copy failed)');
+  }catch(e){
+    console.error(e);
+    showToast(copied ? 'Copied to clipboard, but file save failed' : 'Copy and file save both failed');
   }
 });
 
-// Adds one numbered .jpg per entry (001.jpg, 002.jpg, ...) into the zip,
-// in the order the photos were taken. Uses the final annotated+EXIF photo,
-// never the internal clean basePhoto.
+// Adds TWO numbered copies of every entry into the zip: all the
+// screen-overlay+EXIF versions first (A_<id>.jpg, using the entry's
+// already-stored `photo`), followed by all the EXIF-only/no-overlay
+// versions (X_<id>.jpg, built fresh from the clean `basePhoto` + note —
+// never stored, only computed here at export time).
 function buildZipEntries(zip, allEntries){
-  allEntries
-    .slice()
-    .sort((a,b)=>a.time-b.time)
-    .forEach(e=>{
-      const base64 = e.photo.split(',')[1];
-      zip.file(e.id+'.jpg', base64, {base64:true});
-    });
+  const sorted = allEntries.slice().sort((a,b)=>a.time-b.time);
+  sorted.forEach(e=>{
+    const base64 = e.photo.split(',')[1];
+    zip.file('A_'+e.id+'.jpg', base64, {base64:true});
+  });
+  sorted.forEach(e=>{
+    const exifOnly = embedNoteAsExif(e.basePhoto, e.note);
+    const base64 = exifOnly.split(',')[1];
+    zip.file('X_'+e.id+'.jpg', base64, {base64:true});
+  });
 }
 
-// Hands a finished zip off to the user. Prefers Android's native share
+// Hands a finished file off to the user. Prefers Android's native share
 // sheet (navigator.share) over a plain <a download> link, because a plain
 // download link can get silently blocked on mobile once enough time has
 // passed since the user's last tap — the share sheet has no such limit,
 // and it also lets the user pick exactly where the file goes (Files,
 // Drive, etc.) instead of guessing afterward.
-async function downloadBlob(blob, filename){
+async function downloadBlob(blob, filename, mimeType){
   try{
-    const file = new File([blob], filename, {type: 'application/zip'});
+    const file = new File([blob], filename, {type: mimeType || blob.type || 'application/octet-stream'});
     if(navigator.canShare && navigator.canShare({files:[file]})){
       await navigator.share({files:[file], title: filename});
       return;
@@ -825,9 +984,9 @@ async function downloadBlob(blob, filename){
   setTimeout(()=>URL.revokeObjectURL(url), 4000);
 }
 
-// Exports everything as a single zip. Filename is a sortable timestamp
-// (e.g. 2026_10_31_222135.zip) so repeated exports never collide or need
-// manual renaming.
+// Exports everything as a single zip (both A_ and X_ copies of each item).
+// Filename uses the shared custom export name if one's been set, otherwise
+// a sortable timestamp (e.g. 2026_10_31_222135.zip).
 exportAllBtn.addEventListener('click', async ()=>{
   await flushNoteSave();
   if(!entries.length){ showToast('Nothing to export yet'); return; }
@@ -837,7 +996,8 @@ exportAllBtn.addEventListener('click', async ()=>{
     const zip = new JSZip();
     buildZipEntries(zip, entries);
     const blob = await zip.generateAsync({type:'blob'});
-    await downloadBlob(blob, timestampString() + '.zip');
+    await downloadBlob(blob, exportFileBaseName() + '.zip', 'application/zip');
+    hasExportedCurrentData = true;
     showToast('Zip ready');
   }catch(e){
     console.error(e);
@@ -845,10 +1005,227 @@ exportAllBtn.addEventListener('click', async ()=>{
   }
 });
 
+// ---------- nuke the log ----------
+// Deletes every saved item from storage for a fresh start. Confirmation
+// is a centered overlay rather than anything anchored to the nuke button
+// itself, specifically so a reflexive second tap in the same spot can't
+// accidentally confirm the deletion.
+nukeBtn.addEventListener('click', ()=>{
+  nukeModalBody.textContent = entries.length
+    ? `This will permanently delete all ${entries.length} saved item${entries.length===1?'':'s'} from this browser. This cannot be undone.`
+    : 'There is nothing saved to delete yet.';
+  nukeConfirmBtn.style.display = entries.length ? '' : 'none';
+  nukeModal.style.display = 'flex';
+});
+nukeCancelBtn.addEventListener('click', ()=>{
+  nukeModal.style.display = 'none';
+});
+nukeModal.addEventListener('click', (e)=>{
+  if(e.target === nukeModal) nukeModal.style.display = 'none'; // tapping the backdrop cancels
+});
+nukeConfirmBtn.addEventListener('click', async ()=>{
+  nukeModal.style.display = 'none';
+  showToast('Deleting…');
+  for(const e of entries){
+    try{ await store.del('entry:'+e.id); }catch(err){ console.error('Failed to delete', e.id, err); }
+  }
+  entries = [];
+  cursor = 0;
+  markDataUnexported();
+  exportBaseName = '';
+  updateHeaderTitle();
+  logTabCount.textContent = 0;
+  renderLog();
+  renderCurrentItem();
+  showToast('Log cleared');
+});
+
+// ---------- import a folder or zip as the new working set ----------
+// Lets you point at a previously-exported folder (already unzipped) OR a
+// .zip file directly, and makes it the live working set again — as if
+// those items had always been in this browser. Gated behind having
+// exported the CURRENT set first (unless there's nothing to lose), since
+// importing REPLACES everything.
+//
+// File-pairing logic: each original item exported as two files sharing an
+// id — A_<id>.jpg (caption burned in) and X_<id>.jpg (clean + EXIF only).
+// On import we prefer to rebuild from the X_ copy as the internal
+// `basePhoto` (it's the clean original) and regenerate `photo` fresh from
+// it — that fully restores the same internal shape a captured-in-browser
+// item would have, including being able to edit its note again later
+// without stacking captions. If only the A_ copy is present, it's used
+// for both; editing that item's note later will burn a new caption on
+// top of the one already in the picture, which is an unavoidable
+// limitation of only having the captioned copy to work from.
+importBtn.addEventListener('click', ()=>{
+  if(entries.length > 0 && !hasExportedCurrentData){
+    showToast('You must first export');
+    return;
+  }
+  importChoiceModal.style.display = 'flex';
+});
+importChoiceCancelBtn.addEventListener('click', ()=>{
+  importChoiceModal.style.display = 'none';
+});
+// The two choices are labels tied to their own hidden inputs (a folder
+// picker and a single-file picker can't be combined into one native
+// control), so opening the actual picker stays reliable either way — we
+// just close our own modal alongside it, without blocking that.
+importChooseFolder.addEventListener('click', ()=>{ importChoiceModal.style.display = 'none'; });
+importChooseZip.addEventListener('click', ()=>{ importChoiceModal.style.display = 'none'; });
+
+function fileToDataURL(file){
+  return new Promise((resolve, reject)=>{
+    const r = new FileReader();
+    r.onload = e=>resolve(e.target.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+// Recovers a capture-time timestamp from an id like "2026_10_31_222135"
+// (or "..._2" if it had a collision suffix) so imported items sort back
+// into the same chronological order they were originally captured in.
+function idToTime(id){
+  const m = id.match(/^(\d{4})_(\d{2})_(\d{2})_(\d{2})(\d{2})(\d{2})/);
+  if(!m) return Date.now();
+  const [, y, mo, d, h, mi, s] = m.slice(1).map(Number);
+  return new Date(y, mo - 1, d, h, mi, s).getTime();
+}
+
+function readNoteFromDataUrl(dataUrl){
+  try{
+    const exif = piexif.load(dataUrl);
+    const raw = exif['Exif'] && exif['Exif'][piexif.ExifIFD.UserComment];
+    return raw ? piexif.helper.UserComment.load(raw) : '';
+  }catch(e){
+    return '';
+  }
+}
+
+// Shared core: given a flat list of {name, dataUrl} images (regardless of
+// whether they came from a folder picker or out of a zip), groups them by
+// id, rebuilds each as a full entry, and makes the result the new working
+// set. `derivedName` (the folder or zip's own name) becomes the new
+// export/header name when provided.
+async function importNamedItems(namedItems, derivedName){
+  const jpgs = namedItems.filter(it => /\.(jpe?g)$/i.test(it.name));
+  if(!jpgs.length){ showToast('No .jpg photos found'); return; }
+
+  showToast('Importing…');
+
+  const groups = {};
+  jpgs.forEach(it=>{
+    const stem = it.name.replace(/\.(jpe?g)$/i, '');
+    let kind = 'other', id = stem;
+    if(stem.startsWith('A_')){ kind = 'a'; id = stem.slice(2); }
+    else if(stem.startsWith('X_')){ kind = 'x'; id = stem.slice(2); }
+    if(!groups[id]) groups[id] = {};
+    groups[id][kind] = it.dataUrl;
+  });
+
+  const imported = [];
+  for(const id of Object.keys(groups)){
+    const g = groups[id];
+    try{
+      let basePhoto, photo, note;
+      if(g.x){
+        basePhoto = g.x;
+        note = readNoteFromDataUrl(basePhoto);
+        photo = g.a || await buildFinalPhoto(basePhoto, note);
+      } else if(g.a){
+        photo = g.a;
+        note = readNoteFromDataUrl(photo);
+        basePhoto = photo; // only the captioned copy exists — see note above
+      } else if(g.other){
+        basePhoto = g.other;
+        note = readNoteFromDataUrl(basePhoto);
+        photo = note ? await buildFinalPhoto(basePhoto, note) : basePhoto;
+      } else {
+        continue;
+      }
+      imported.push({ id, basePhoto, photo, note, time: idToTime(id) });
+    }catch(err){
+      console.error('Failed to import', id, err);
+    }
+  }
+
+  if(!imported.length){ showToast('Nothing importable found'); return; }
+
+  // This becomes the new working set — clear whatever was here first.
+  for(const old of entries){
+    try{ await store.del('entry:'+old.id); }catch(err){ console.error('Failed to clear old entry', old.id, err); }
+  }
+  for(const item of imported){
+    try{ await store.set('entry:'+item.id, item); }catch(err){ console.error('Failed to save imported item', item.id, err); }
+  }
+
+  imported.sort((a,b)=>a.time-b.time);
+  entries = imported;
+  cursor = Math.max(0, entries.length - 1);
+  markDataUnexported();
+  if(derivedName) setExportName(derivedName);
+  logTabCount.textContent = entries.length;
+  renderLog();
+  renderCurrentItem();
+  showToast('Imported ' + entries.length + ' item' + (entries.length === 1 ? '' : 's'));
+}
+
+// Folder import: each File carries webkitRelativePath ("FolderName/A_....jpg"),
+// which both identifies files belonging to the folder and gives us the
+// folder's own name to use for auto-naming.
+importFolderInput.addEventListener('change', async (e)=>{
+  const files = Array.from(e.target.files || []);
+  importFolderInput.value = '';
+  if(!files.length) return;
+
+  const withPath = files.find(f => f.webkitRelativePath);
+  const derivedName = withPath ? withPath.webkitRelativePath.split('/')[0] : null;
+
+  const namedItems = [];
+  for(const f of files){
+    if(!/\.(jpe?g)$/i.test(f.name)) continue;
+    try{
+      namedItems.push({ name: f.name, dataUrl: await fileToDataURL(f) });
+    }catch(err){
+      console.error('Failed to read', f.name, err);
+    }
+  }
+  await importNamedItems(namedItems, derivedName);
+});
+
+// Zip import: unzips in-browser with JSZip (already loaded for export),
+// pulls out every .jpg entry, and feeds them through the same shared core.
+importZipInput.addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  importZipInput.value = '';
+  if(!file) return;
+  if(typeof JSZip === 'undefined'){ showToast('Zip library failed to load — check connection'); return; }
+
+  showToast('Reading zip…');
+  try{
+    const zip = await JSZip.loadAsync(file);
+    const namedItems = [];
+    for(const relPath of Object.keys(zip.files)){
+      const entry = zip.files[relPath];
+      if(entry.dir || !/\.(jpe?g)$/i.test(relPath)) continue;
+      const base64 = await entry.async('base64');
+      namedItems.push({ name: relPath.split('/').pop(), dataUrl: 'data:image/jpeg;base64,' + base64 });
+    }
+    const derivedName = file.name.replace(/\.zip$/i, '');
+    await importNamedItems(namedItems, derivedName);
+  }catch(err){
+    console.error(err);
+    showToast('Could not read that zip file');
+  }
+});
+
 // ---------- startup ----------
 // Runs once when the page loads: figures out which storage backend
-// actually works here, adjusts photo size/quality accordingly, and then
-// loads whatever was already saved.
+// actually works here, adjusts photo size/quality accordingly, loads
+// whatever was already saved, and sets the header title. On a genuinely
+// fresh install (no saved items, no name ever set), it goes straight into
+// naming the file rather than sitting on a generic title.
 async function init(){
   storageBackend = await detectStorageBackend();
   const notice = document.getElementById('storageNotice');
@@ -861,6 +1238,10 @@ async function init(){
     notice.style.display = 'none';
   }
   await loadEntries();
+  updateHeaderTitle();
+  if(entries.length === 0 && !exportBaseName){
+    renameBtn.click();
+  }
 }
 init();
 </script>
